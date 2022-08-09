@@ -58,7 +58,20 @@ printptr(uint64 x)
   for (i = 0; i < (sizeof(uint64) * 2); i++, x <<= 4)
     consputc(digits[x >> (sizeof(uint64) * 8 - 4)]);
 }
-
+void backtrace()
+{
+  uint64* fp = (uint64*)r_fp();
+  uint64 up = PGROUNDUP((uint64)fp);
+  uint64* ra;
+  printf("backtrace:\n");
+  while((uint64)fp != up)
+  {
+    fp = (uint64*)((uint64)fp - 16);
+    ra = (uint64*)((uint64)fp + 8);
+    printf("%p\n", *ra);
+    fp = (uint64*)*fp;
+  }
+}
 // Print to the console. only understands %d, %x, %p, %s.
 void
 printf(char *fmt, ...)
