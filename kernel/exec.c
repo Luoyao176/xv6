@@ -7,8 +7,6 @@
 #include "defs.h"
 #include "elf.h"
 
-extern pte_t* walk(pagetable_t, int, int);
-
 static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
 
 int

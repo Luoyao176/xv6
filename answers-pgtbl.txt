@@ -1,0 +1,6 @@
+第一行显示了vmprint()的参数。在那之后每行对应一个PTE，包含树中指向page-table pages的PTE。
+每个PTE行由一些".."（表明树的深度）缩进。
+每个PTE行显示PTE在page-table page中的索引、pte地址、pte中的物理页地址。不要打印无效PTE。
+在上面的例子中，有顶级page-table page：0、255。entry 0的下一级仅有索引0， 这个索引0的下一级有0、1、2三个PTE。
+你的代码可能生成与上面那些代码不同的物理地址。entry和虚拟地址的数量应该一样。
+

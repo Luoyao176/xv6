@@ -7,8 +7,6 @@
 #include "spinlock.h"
 #include "proc.h"
 
-extern pte_t* walk(pagetable_t, int, int);
-
 uint64
 sys_exit(void)
 {

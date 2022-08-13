@@ -20,10 +20,8 @@ static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
-extern char etext;
-extern pagetable_t kvmmake();
-extern void uvmfree2(pagetable_t pagetable, uint64 va, uint npages);
-extern pte_t* walk(pagetable_t, int, int);
+
+extern char etext[];
 
 // initialize the proc table at boot time.
 void
@@ -116,14 +114,6 @@ found:
     release(&p->lock);
     return 0;
   }
-
-  // An empty user page table.
-  p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
   
   p->kernelPageTable = kvmmake();
   char *pa = kalloc();
@@ -133,6 +123,14 @@ found:
   mappages(p->kernelPageTable, va, PGSIZE, (uint64)pa, PTE_R|PTE_W);
   p->kstack = va;
 
+  // An empty user page table.
+  p->pagetable = proc_pagetable(p);
+  if(p->pagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -146,7 +144,7 @@ void proc_free_kernel_pagetable(uint64 kstack, pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, UART0, 1, 0);
   uvmunmap(pagetable, VIRTIO0, 1, 0);
-  uvmunmap(pagetable, CLINT, 0x10000/PGSIZE, 0);
+//  uvmunmap(pagetable, CLINT, 0x10000/PGSIZE, 0);
   uvmunmap(pagetable, PLIC, 0x400000/PGSIZE, 0);
   uvmunmap(pagetable, KERNBASE, ((uint64)etext-KERNBASE)/PGSIZE, 0);
   uvmunmap(pagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE, 0);
