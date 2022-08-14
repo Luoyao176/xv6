@@ -104,8 +104,8 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  int duration;             // sys_alarm ticks after last alarm
-  uint64 handler;           // alarm handle 
-  int alarm;                // sys_alarm alarm every n ticks
-  struct trapframe *alarm_trapframe; //register saved for alarm
+  int ticks;                   // Ticks between two alarms. 
+  uint64 handler;              // Alarm handler.
+  int remain_ticks;            // Remaining ticks after last alarm.
+  struct trapframe *save_trapframe; // Save trapframe page when handling alarm.
 };
