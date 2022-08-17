@@ -33,7 +33,7 @@ procinit(void)
       initlock(&p->lock, "proc");
 
   }
-  kvminithart();
+//  kvminithart();
 }
 
 // Must be called with interrupts disabled,
