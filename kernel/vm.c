@@ -17,8 +17,6 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-int refNum[32768];
-
 /*
  * create a direct-map page table for the kernel.
  */
@@ -160,13 +158,10 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
-      panic("remap");
+    // if(*pte & PTE_V)
+    //   panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
-	if (pa >= KERNBASE){
-	  refNum[(pa - KERNBASE)/PGSIZE] += 1;
-	}
-	if(a == last)
+    if(a == last)
       break;
     a += PGSIZE;
     pa += PGSIZE;
@@ -193,16 +188,11 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-	uint64 pa = PTE2PA(*pte);
-    if (pa >= KERNBASE){
-	  refNum[(pa - KERNBASE)/PGSIZE] -= 1;
+    if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
     }
-	if(do_free){
-      if (refNum[((uint64)pa - KERNBASE)/PGSIZE] == 1){
-        kfree((void*)pa);
-      }
-	}
-	*pte = 0;
+    *pte = 0;
   }
 }
 
@@ -323,19 +313,22 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  
+
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    *pte = *pte & ~PTE_W;
-    *pte = *pte | PTE_COW;
     flags = PTE_FLAGS(*pte);
-    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+
+    *pte = ((*pte) & (~PTE_W)) | PTE_COW; // set parent's page unwritable
+    // printf("c: %p %p %p\n", i, ((flags & (~PTE_W)) | PTE_COW), *pte);
+    // map child's page with page unwritable
+    if(mappages(new, i, PGSIZE, (uint64)pa, (flags & (~PTE_W)) | PTE_COW) != 0){
       goto err;
     }
+    refcnt_incr(pa, 1);
   }
   return 0;
 
@@ -367,35 +360,21 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+
+    if(va0 >= MAXVA)
       return -1;
-	pte_t *pte;
-	if ((pte = walk(pagetable, va0, 0)) == 0){
-	  return -1;
-    }
-	if (*pte & PTE_COW){
-      char *mem;
-      uint flags;
-      if (refNum[(pa0 - KERNBASE)/PGSIZE] == 2){
-        *pte = *pte | PTE_W;
-        *pte = *pte & ~PTE_COW;
-      }else {
-        if((mem = kalloc()) == 0){
-          return -1;
-        }else {
-          refNum[(pa0 - KERNBASE)/PGSIZE] -= 1;
-          memmove(mem, (char*)pa0, PGSIZE);
-          *pte = *pte | PTE_W;
-          *pte = *pte & ~PTE_COW;
-          flags = PTE_FLAGS(*pte);
-          *pte = PA2PTE((uint64)mem) | flags;
-          refNum[((uint64)mem - KERNBASE)/PGSIZE] += 1;
-          pa0 = (uint64)mem;
-        }
+    pte_t* pte = walk(pagetable, va0, 0);
+    if(pte && (*pte & PTE_COW) != 0){
+      // cow page
+      if(cowcopy(va0) != 0){
+        return -1;
       }
     }
-	n = PGSIZE - (dstva - va0);
+    pa0 = walkaddr(pagetable, va0);
+
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
     memmove((void *)(pa0 + (dstva - va0)), src, n);
@@ -473,4 +452,45 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+cowcopy(uint64 va){
+  va = PGROUNDDOWN(va);
+  pagetable_t p = myproc()->pagetable;
+  pte_t* pte = walk(p, va, 0);
+  uint64 pa = PTE2PA(*pte);
+  uint flags = PTE_FLAGS(*pte);
+
+  // printf("w: %p %p %p\n", va, flags, *pte);
+
+  if(!(flags & PTE_COW)){
+    printf("not cow\n");
+    return -2; // not cow page
+  }
+
+  acquire_refcnt();
+  uint ref = refcnt_getter(pa);
+  // printf("%d\n", *ref);
+  if(ref > 1){
+    // ref > 1, alloc a new page
+    char* mem = kalloc_nolock();
+    if(mem == 0)
+      goto bad;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(p, va, PGSIZE, (uint64)mem, (flags & (~PTE_COW)) | PTE_W) != 0){
+      kfree(mem);
+      goto bad;
+    }
+    refcnt_setter(pa, ref - 1);
+  }else{
+    // ref = 1, use this page directly
+    *pte = ((*pte) & (~PTE_COW)) | PTE_W;
+  }
+  release_refcnt();
+  return 0;
+
+  bad:
+  release_refcnt();
+  return -1;
 }
